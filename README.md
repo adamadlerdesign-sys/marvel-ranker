@@ -8,6 +8,10 @@ Pick everything you've seen, optionally do a 10-second-per-title warm-up (Loved 
 
 When you finish you get the full ranked list with podium, category filters (MCU films, MCU TV, Fox, Sony, Marvel Television, classics), search, and drag-to-reorder editing. Adding a title you watch later only takes a handful of matchups — it binary-searches into your existing list.
 
+## Multiple lists
+
+You can keep several rankings at once — say *MCU Movies*, *Full MCU*, and *The Total List* — with one-tap presets for the common ones. Lists are smart about each other: if a new list's titles are all covered by one you've already finished, its order derives instantly with zero matchups; if they overlap partially, a "head start" keeps your existing order as the backbone so you only rank the new titles. You never answer the same matchup twice. Each list shares, compares, and re-ranks independently, and older single-ranking saves migrate automatically.
+
 ## Sharing & comparing
 
 "Copy share link" produces a URL with your entire ranking encoded in the fragment — no server, no accounts. A friend opening it sees the compare view: similarity score, biggest disagreements, where you agree, and both top 10s. Friends' rankings are saved locally so you can re-compare any time. There are also raw share codes (for texting) and full save export/import (for moving devices).

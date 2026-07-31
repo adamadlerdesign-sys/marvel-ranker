@@ -335,6 +335,39 @@ header{
 .saved-friends{margin-top:30px}
 .friend-pill{display:inline-flex;align-items:center;gap:8px;margin:0 8px 8px 0}
 
+/* ---------- lists hub ---------- */
+.hub-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:26px 0 14px}
+.lists-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px}
+.list-card{
+  background:linear-gradient(180deg,var(--panel),var(--bg2));border:1px solid var(--line);
+  border-radius:var(--r);padding:18px 18px 16px;display:flex;flex-direction:column;gap:9px;
+  transition:.18s;text-align:left;
+}
+.list-card:hover{border-color:var(--line2);transform:translateY(-3px)}
+.list-card.done{border-color:rgba(245,197,66,.3)}
+.list-card .lc-top{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+.list-card .lc-title{font-family:var(--disp);font-size:24px;letter-spacing:.06em;line-height:1}
+.list-card.done .lc-title{color:var(--gold)}
+.list-card .lc-tools{display:flex;gap:4px;opacity:.45;transition:.15s}
+.list-card:hover .lc-tools{opacity:1}
+.list-card .lc-sub{font-size:12.5px;color:var(--dim);line-height:1.45;min-height:18px}
+.list-card .lc-actions{margin-top:auto;padding-top:6px}
+.list-card.add{
+  align-items:center;justify-content:center;text-align:center;cursor:pointer;gap:4px;
+  border-style:dashed;border-color:var(--line2);background:rgba(255,255,255,.02);min-height:130px;
+}
+.list-card.add:hover{border-color:var(--red);background:rgba(230,36,41,.05)}
+.list-card.add .lc-plus{font-family:var(--disp);font-size:34px;color:var(--red);line-height:1}
+.preset-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.preset{
+  border:1px solid var(--line2);border-radius:10px;background:var(--panel);padding:13px 10px 11px;
+  display:flex;flex-direction:column;gap:2px;align-items:center;transition:.15s;
+}
+.preset:hover{transform:translateY(-2px);border-color:rgba(230,36,41,.6);background:var(--panel2)}
+.preset b{font-family:var(--disp);font-weight:400;font-size:17px;letter-spacing:.08em}
+.preset span{font-size:10.5px;color:var(--faint)}
+.foot-link{border:none;text-decoration:underline dotted;text-underline-offset:3px;padding:2px}
+
 /* toast + confetti + modal */
 #toast{
   position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(80px);z-index:200;
@@ -429,7 +462,13 @@ const CATS = {
 };
 const CAT_ORDER = ['mcu-film','mcu-tv','sony','fox','tv','classic'];
 const TIER_NAMES = ['Loved it','Liked it','It was fine','Not for me'];
-const KEY = 'marvelRankerV1';
+const KEY = 'marvelRankerV2';
+const KEY_V1 = 'marvelRankerV1';
+const PRESETS = {
+  'mcu-movies': { title:'MCU Movies',  match: it=>it.c==='mcu-film' },
+  'full-mcu':   { title:'Full MCU',    match: it=>it.c==='mcu-film'||it.c==='mcu-tv' },
+  'everything': { title:'The Total List', match: ()=>true },
+};
 
 /* ---------- tiny dom helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -445,7 +484,7 @@ function modal(title, text, btns){
   $('#modal-text').innerHTML = text;
   const wrap = $('#modal-btns'); wrap.innerHTML='';
   btns.forEach(b=>{
-    const btn = el('button', b.cls || 'btn small', esc(b.label));
+    const btn = el('button', b.cls || 'btn small', b.label);
     btn.onclick = ()=>{ closeModal(); b.fn && b.fn(); };
     wrap.appendChild(btn);
   });
@@ -471,7 +510,7 @@ function shuffle(a){ a=[...a]; for(let i=a.length-1;i>0;i--){ const j=Math.floor
 function log2ceil(n){ return n<=1 ? 0 : Math.ceil(Math.log2(n)); }
 
 /* ---------- poster builder ---------- */
-function shade(hex, f){ // darken a hex color by factor f (0..1)
+function shade(hex, f){
   const n=parseInt(hex.slice(1),16), r=(n>>16)&255,g=(n>>8)&255,b=n&255;
   return `rgb(${Math.round(r*f)},${Math.round(g*f)},${Math.round(b*f)})`;
 }
@@ -491,20 +530,45 @@ function posterEl(idx){
 }
 function catDot(c){ return `<span class="cat-dot" style="background:${CATS[c].color}"></span>`; }
 
-/* ---------- state ---------- */
+/* ---------- state: multiple lists ---------- */
 let PERSIST = true, warned = false;
-function blankState(){ return { v:1, name:'', seen:[], tierQueue:null, tierOf:{}, tierHist:[], rank:null, final:null, friends:[], updatedAt:0 }; }
+function blankState(){ return { v:2, name:'', active:null, lists:[], friends:[] }; }
+function newListObj(title){
+  return { id: 'l'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),
+           title: title || 'My List', seen:[], tierQueue:null, tierOf:{}, tierHist:[],
+           rank:null, final:null, rankStats:null };
+}
+function migrateV1(old){
+  const st = blankState();
+  st.name = old.name || '';
+  st.friends = (old.friends||[]).map(f=>({name:f.name, title:f.title||'', order:f.order, at:f.at||Date.now()}));
+  if((old.seen||[]).length || old.final || old.rank){
+    const l = newListObj('My Ranking');
+    ['seen','tierQueue','tierOf','tierHist','rank','final','rankStats'].forEach(k=>{ if(old[k]!==undefined) l[k]=old[k]; });
+    st.lists = [l]; st.active = l.id;
+  }
+  return st;
+}
 let S = blankState();
+let justMigrated = false;
 try{
   const raw = localStorage.getItem(KEY);
-  if(raw){ const p = JSON.parse(raw); if(p && p.v===1) S = Object.assign(blankState(), p); }
+  if(raw){ const p = JSON.parse(raw); if(p && p.v===2) S = Object.assign(blankState(), p); }
+  else {
+    const raw1 = localStorage.getItem(KEY_V1);
+    if(raw1){ const p1 = JSON.parse(raw1); if(p1 && p1.v===1){ S = migrateV1(p1); justMigrated = true; } }
+  }
 }catch(e){ PERSIST=false; }
+function L(){ return S.lists.find(l=>l.id===S.active) || null; }
+function completedListsA(){ return S.lists.filter(l=>l.final && l.final.length>1); }
+function unionSeen(){ const u = new Set(); S.lists.forEach(l=>l.seen.forEach(i=>u.add(i))); return u; }
 function save(){
   S.updatedAt = Date.now();
   if(!PERSIST) return;
   try{ localStorage.setItem(KEY, JSON.stringify(S)); }
   catch(e){ PERSIST=false; if(!warned){ warned=true; toast('Heads up: saving is blocked in this browser view. Use “Export save” to keep your progress.'); } }
 }
+if(justMigrated) save();
 
 /* ---------- estimates ---------- */
 function estFull(n){ let s=0; for(let i=2;i<=n;i++) s+=log2ceil(i); return s; }
@@ -518,124 +582,195 @@ function show(name, arg){
   CUR = name;
   SCREENS.forEach(s=>$('#scr-'+s).classList.toggle('active', s===name));
   $('#pick-foot').classList.toggle('show', name==='pick');
-  $('#nav-results').hidden = !(S.final || S.rank);
-  $('#nav-results').textContent = S.final ? 'My Ranking' : 'In Progress';
+  const nb = $('#nav-results');
+  nb.hidden = !S.lists.length;
+  nb.textContent = S.lists.length>1 ? 'My Lists' : (L() ? (L().final?'My Ranking':'In Progress') : 'My Lists');
   window.scrollTo({top:0});
   ({home:renderHome, pick:renderPick, tiers:renderTiers, rank:renderRank, results:renderResults, compare:renderCompare})[name](arg);
 }
 $$('.wordmark,[data-nav]').forEach(b=>{
   const nav = b.dataset.nav;
   if(nav) b.addEventListener('click', ()=>{
-    if(nav==='results' && !S.final && S.rank) return show('rank');
+    if(nav==='results'){
+      if(S.lists.length===1 && L()){ return show(L().final ? 'results' : (L().rank ? 'rank' : 'home')); }
+      return show('home');
+    }
     show(nav);
   });
 });
 
-/* ---------- HOME ---------- */
+/* ---------- HOME (list hub) ---------- */
+function listStatus(l){
+  if(l.final) return { key:'done', sub:`Complete · ${l.final.length} titles · 👑 ${CATALOG[l.final[0]].t}`, pct:100, cta:'VIEW' };
+  if(l.rank){ const placed=l.rank.sorted.flat().length; return { key:'rank', sub:`${placed} of ${l.seen.length} placed · ${l.rank.comps} matchups in`, pct:Math.round(100*placed/Math.max(1,l.seen.length)), cta:'RESUME' }; }
+  if(l.tierQueue && l.tierQueue.length){ const d=l.seen.length-l.tierQueue.length; return { key:'tiers', sub:`Warm-up · ${d} of ${l.seen.length} sorted`, pct:Math.round(100*d/Math.max(1,l.seen.length)), cta:'RESUME' }; }
+  if(l.seen.length) return { key:'ready', sub:`${l.seen.length} titles picked — ready to rank`, pct:0, cta:'START' };
+  return { key:'empty', sub:'Nothing picked yet', pct:0, cta:'PICK TITLES' };
+}
+function goToList(l){
+  S.active = l.id; save();
+  if(l.final) return show('results');
+  if(l.rank) return show('rank');
+  if(l.tierQueue && l.tierQueue.length) return show('tiers');
+  return show('pick');
+}
 function renderHome(){
   const root = $('#scr-home');
   const films = CATALOG.filter(i=>i.m==='film').length;
   const shows = CATALOG.filter(i=>i.m==='show').length;
   const specials = CATALOG.filter(i=>i.m==='special').length;
-  const inProgress = S.rank && !S.final;
-  const placed = inProgress ? S.rank.sorted.flat().length + (S.rank.cur?0:0) : 0;
+  const hasLists = S.lists.length>0;
 
   root.innerHTML = `
-    <div class="hero">
+    <div class="hero" style="${hasLists?'padding:26px 0 8px':''}">
       <div class="kicker">Every film · Every show · Head to head</div>
-      <h2 class="h-disp">RANK THE <span class="rk">MULTIVERSE</span></h2>
+      <h2 class="h-disp" style="${hasLists?'font-size:clamp(40px,7vw,72px)':''}">RANK THE <span class="rk">MULTIVERSE</span></h2>
+      ${hasLists?'':`
       <p class="tag">MCU, X&#8209;Men, Spider&#8209;Verse, the Netflix era, even the cult classics — <b>${CATALOG.length} titles</b> through July 2026. Pick what you've seen, then settle it one matchup at a time until you hold <b>the definitive ranking</b>.</p>
       <div class="stat-row">
         <div class="stat"><div class="n">${films}</div><div class="l">Films</div></div>
         <div class="stat"><div class="n">${shows}</div><div class="l">Series</div></div>
         <div class="stat"><div class="n">${specials}</div><div class="l">Specials</div></div>
         <div class="stat"><div class="n">40</div><div class="l">Years</div></div>
-      </div>
-      ${inProgress ? `
-        <div class="card-panel" id="continue-card">
-          <div class="cc-info">
-            <div class="cc-title">RANKING IN PROGRESS</div>
-            <div class="cc-sub">${placed} of ${S.seen.length} placed · ${S.rank.comps} matchups so far</div>
-            <div class="cc-bar"><i style="width:${progressPct()}%"></i></div>
-          </div>
-          <button class="btn small" id="cc-resume">RESUME</button>
-        </div>` : ''}
-      ${S.final ? `
-        <div class="card-panel" id="continue-card">
-          <div class="cc-info">
-            <div class="cc-title">YOUR RANKING IS LIVE</div>
-            <div class="cc-sub">#1: ${esc(CATALOG[S.final[0]].t)} · ${S.final.length} titles ranked</div>
-          </div>
-          <button class="btn small gold" id="cc-view">VIEW IT</button>
-        </div>` : ''}
+      </div>`}
+      ${hasLists ? '' : `
       <div class="home-cta">
-        ${(!S.final && !inProgress) ? `
-          <div class="name-wrap"><label for="inp-name">Your name</label>
-            <input id="inp-name" maxlength="18" placeholder="e.g. Adam" value="${esc(S.name)}"></div>
-          <button class="btn" id="btn-begin">BUILD MY RANKING</button>` : ''}
-        <div class="home-secondary">
-          ${(S.final || inProgress) ? `<button class="minibtn" id="btn-edit-seen">Edit my seen list</button>
-            <button class="minibtn danger" id="btn-restart">Start over</button>` : ''}
-          <button class="minibtn" data-nav="compare">I have a friend's code</button>
-        </div>
-      </div>
+        <div class="name-wrap"><label for="inp-name">Your name</label>
+          <input id="inp-name" maxlength="18" placeholder="e.g. Adam" value="${esc(S.name)}"></div>
+        <button class="btn" id="btn-newlist">CREATE MY FIRST LIST</button>
+        <div class="home-secondary"><button class="minibtn" data-nav="compare">I have a friend's code</button></div>
+      </div>`}
     </div>
+    ${hasLists ? `
+    <div class="hub-head">
+      <h3 class="h-disp" style="font-size:26px;letter-spacing:.08em">${S.name ? esc(S.name.toUpperCase())+'’S' : 'YOUR'} LISTS</h3>
+      <button class="minibtn" data-nav="compare">⚔️ Compare</button>
+    </div>
+    <div class="lists-grid" id="lists-grid"></div>` : ''}
     <div class="home-foot">
       Complete through <b>Spider-Man: Brand New Day</b> &amp; <b>Spider-Noir</b> (July 2026) · Progress saves automatically in this browser
-      · <button class="minibtn" id="btn-export" style="border:none;text-decoration:underline dotted;text-underline-offset:3px;padding:2px">Export save</button>
-      <button class="minibtn" id="btn-import" style="border:none;text-decoration:underline dotted;text-underline-offset:3px;padding:2px">Import save</button>
+      · <button class="minibtn foot-link" id="btn-export">Export save</button>
+      <button class="minibtn foot-link" id="btn-import">Import save</button>
     </div>`;
 
   root.querySelectorAll('[data-nav]').forEach(b=>b.addEventListener('click',()=>show(b.dataset.nav)));
-  const begin = $('#btn-begin');
-  if(begin) begin.onclick = ()=>{ S.name = ($('#inp-name').value||'').trim(); save(); show('pick'); };
-  const inp = $('#inp-name');
-  if(inp) inp.addEventListener('keydown', e=>{ if(e.key==='Enter') begin.click(); });
-  const res = $('#cc-resume'); if(res) res.onclick = ()=>show('rank');
-  const view = $('#cc-view'); if(view) view.onclick = ()=>show('results');
-  const es = $('#btn-edit-seen'); if(es) es.onclick = ()=>show('pick');
-  const rs = $('#btn-restart'); if(rs) rs.onclick = confirmRestart;
-  $('#btn-export').onclick = ()=>copyText('MRSAVE1.'+b64encode(new TextEncoder().encode(JSON.stringify(S))), 'Full save copied — paste it somewhere safe (or into another device).');
-  $('#btn-import').onclick = ()=>{
-    modal('IMPORT SAVE','Paste an exported save code below.',[{label:'Cancel',cls:'minibtn'}]);
-    const p = $('#modal-text');
-    p.innerHTML = '<input id="imp-inp" style="width:100%;background:var(--panel);border:1px solid var(--line2);border-radius:8px;color:var(--txt);padding:10px 12px;font-size:12px" placeholder="MRSAVE1.…">';
-    const b = el('button','btn small','IMPORT');
-    b.onclick = ()=>{
-      const v = ($('#imp-inp').value||'').trim();
-      try{
-        if(!v.startsWith('MRSAVE1.')) throw 0;
-        const obj = JSON.parse(new TextDecoder().decode(b64decode(v.slice(8))));
-        if(obj.v!==1 || !Array.isArray(obj.seen)) throw 0;
-        S = Object.assign(blankState(), obj); save(); closeModal(); toast('Save imported!'); show('home');
-      }catch(e){ toast('That code didn’t parse — check you copied the whole thing.'); }
-    };
-    $('#modal-btns').prepend(b);
-  };
+
+  if(!hasLists){
+    $('#btn-newlist').onclick = ()=>{ S.name = ($('#inp-name').value||'').trim(); save(); openNewListModal(); };
+    $('#inp-name').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#btn-newlist').click(); });
+  } else {
+    const grid = $('#lists-grid');
+    S.lists.forEach(l=>{
+      const st = listStatus(l);
+      const card = el('div','list-card'+(st.key==='done'?' done':''));
+      card.innerHTML = `
+        <div class="lc-top">
+          <div class="lc-title">${esc(l.title)}</div>
+          <div class="lc-tools">
+            <button class="ed-btn" data-act="rename" title="Rename">✎</button>
+            <button class="ed-btn" data-act="delete" title="Delete">✕</button>
+          </div>
+        </div>
+        <div class="lc-sub">${st.sub}</div>
+        ${st.key==='rank'||st.key==='tiers' ? `<div class="cc-bar"><i style="width:${st.pct}%"></i></div>` : ''}
+        <div class="lc-actions"><button class="btn small ${st.key==='done'?'gold':''}">${st.cta}</button></div>`;
+      card.querySelector('.lc-actions .btn').onclick = ()=>goToList(l);
+      card.querySelector('[data-act="rename"]').onclick = (e)=>{ e.stopPropagation(); renameList(l); };
+      card.querySelector('[data-act="delete"]').onclick = (e)=>{ e.stopPropagation(); confirmDeleteList(l); };
+      grid.appendChild(card);
+    });
+    const add = el('button','list-card add','<div class="lc-plus">+</div><div class="lc-title" style="font-size:20px">NEW LIST</div><div class="lc-sub">MCU only, everything, or your own cut</div>');
+    add.onclick = openNewListModal;
+    grid.appendChild(add);
+  }
+
+  $('#btn-export').onclick = ()=>copyText('MRSAVE2.'+b64encode(new TextEncoder().encode(JSON.stringify(S))), 'Full save copied — paste it somewhere safe (or into another device).');
+  $('#btn-import').onclick = importSaveModal;
 }
-function confirmRestart(){
-  modal('START OVER?', 'This wipes your current ranking and matchup progress (friends you’ve saved are kept).', [
+function importSaveModal(){
+  modal('IMPORT SAVE','Paste an exported save code below.',[{label:'Cancel',cls:'minibtn'}]);
+  const p = $('#modal-text');
+  p.innerHTML = '<input id="imp-inp" style="width:100%;background:var(--panel);border:1px solid var(--line2);border-radius:8px;color:var(--txt);padding:10px 12px;font-size:12px" placeholder="MRSAVE2.…">';
+  const b = el('button','btn small','IMPORT');
+  b.onclick = ()=>{
+    const v = ($('#imp-inp').value||'').trim();
+    try{
+      let obj;
+      if(v.startsWith('MRSAVE2.')) obj = JSON.parse(new TextDecoder().decode(b64decode(v.slice(8))));
+      else if(v.startsWith('MRSAVE1.')) obj = migrateV1(JSON.parse(new TextDecoder().decode(b64decode(v.slice(8)))));
+      else throw 0;
+      if(obj.v!==2 || !Array.isArray(obj.lists)) throw 0;
+      S = Object.assign(blankState(), obj); save(); closeModal(); toast('Save imported!'); show('home');
+    }catch(e){ toast('That code didn’t parse — check you copied the whole thing.'); }
+  };
+  $('#modal-btns').prepend(b);
+}
+function openNewListModal(){
+  modal('NEW LIST', '', [{label:'Cancel', cls:'minibtn'}]);
+  $('#modal-text').innerHTML = `
+    <input id="nl-title" maxlength="30" placeholder="Name it (or tap a preset)…"
+      style="width:100%;background:var(--panel);border:1px solid var(--line2);border-radius:8px;color:var(--txt);padding:11px 13px;font-size:14px;margin-bottom:14px">
+    <div class="preset-grid">
+      <button class="preset" data-preset="mcu-movies"><b>MCU MOVIES</b><span>the 38 films</span></button>
+      <button class="preset" data-preset="full-mcu"><b>FULL MCU</b><span>films + shows + specials</span></button>
+      <button class="preset" data-preset="everything"><b>THE TOTAL LIST</b><span>all 117, every era</span></button>
+      <button class="preset" data-preset="custom"><b>CUSTOM</b><span>hand-pick the pool</span></button>
+    </div>`;
+  $$('#modal-text .preset').forEach(b=>b.onclick = ()=>{
+    const key = b.dataset.preset;
+    const typed = ($('#nl-title').value||'').trim();
+    const title = typed || (PRESETS[key] ? PRESETS[key].title : `My List ${S.lists.length+1}`);
+    const l = newListObj(title);
+    S.lists.push(l); S.active = l.id;
+    pendingPreset = key; save(); closeModal(); show('pick');
+  });
+  setTimeout(()=>{ const i=$('#nl-title'); if(i) i.focus(); }, 50);
+}
+function renameList(l){
+  modal('RENAME LIST','',[{label:'Cancel',cls:'minibtn'}]);
+  $('#modal-text').innerHTML = `<input id="rn-inp" maxlength="30" value="${esc(l.title)}" style="width:100%;background:var(--panel);border:1px solid var(--line2);border-radius:8px;color:var(--txt);padding:11px 13px;font-size:14px">`;
+  const b = el('button','btn small','SAVE');
+  b.onclick = ()=>{ const v=($('#rn-inp').value||'').trim(); if(v) l.title=v; save(); closeModal(); renderHome(); };
+  $('#modal-btns').prepend(b);
+}
+function confirmDeleteList(l){
+  modal('DELETE “'+esc(l.title).toUpperCase()+'”?', 'This removes the list and its ranking. Other lists aren’t touched.', [
     {label:'Cancel', cls:'minibtn'},
-    {label:'Wipe & restart', fn:()=>{ const f=S.friends, n=S.name; S=blankState(); S.friends=f; S.name=n; save(); show('pick'); }}
+    {label:'Delete it', fn:()=>{
+      S.lists = S.lists.filter(x=>x.id!==l.id);
+      if(S.active===l.id) S.active = S.lists.length ? S.lists[0].id : null;
+      save(); show('home');
+    }}
   ]);
 }
-function progressPct(){
-  if(!S.rank) return 0;
-  const done = S.rank.comps, rem = estRemaining();
-  return Math.min(99, Math.round(100*done/Math.max(1,done+rem)));
+function confirmRerank(){
+  modal('RE-RANK THIS LIST?', `This wipes the order and matchup progress of “${esc(L().title)}” so you can rank it again. Your picks and other lists are kept.`, [
+    {label:'Cancel', cls:'minibtn'},
+    {label:'Wipe & re-rank', fn:()=>{ const l=L(); l.rank=null; l.final=null; l.tierOf={}; l.tierHist=[]; l.tierQueue=null; l.rankStats=null; save(); show('pick'); }}
+  ]);
 }
 
 /* ---------- PICK (seen selection) ---------- */
 let sel = new Set();
+let pendingPreset = null;
 function renderPick(){
   const root = $('#scr-pick');
-  sel = new Set(S.seen);
-  const editing = !!(S.final || S.rank);
+  if(!L()) return show('home');
+  const editing = !!(L().final || L().rank);
+  if(L().seen.length){ sel = new Set(L().seen); }
+  else if(pendingPreset && PRESETS[pendingPreset]){
+    const scope = CATALOG.map((it,i)=>[it,i]).filter(([it])=>PRESETS[pendingPreset].match(it)).map(([,i])=>i);
+    const u = unionSeen();
+    sel = new Set(u.size ? scope.filter(i=>u.has(i)) : scope);
+  } else {
+    sel = new Set();
+  }
+  pendingPreset = null;
   root.innerHTML = `
     <div class="scr-head">
-      <div class="kicker">Step 1 of 3</div>
-      <h2 class="h-disp">WHAT HAVE YOU SEEN?</h2>
-      <p>Tap everything you've watched — only these enter the arena. ${editing? 'Removing a title drops it from your ranking; new picks get ranked in with a few extra matchups.' : 'Don’t stress about being complete; you can add titles later and they’ll slot right in.'}</p>
+      <div class="kicker">${esc(L().title)} · Step 1 of 3</div>
+      <h2 class="h-disp">WHAT'S IN THIS LIST?</h2>
+      <p>Tap everything you've watched that belongs in “${esc(L().title)}” — only these enter the arena. ${editing? 'Removing a title drops it from this ranking; new picks get ranked in with a few extra matchups.' : 'You can add titles later and they’ll slot right in.'}</p>
     </div>
     <div class="pick-tools">
       <button class="minibtn" id="pt-allfilms">All films</button>
@@ -695,21 +830,54 @@ function refreshPickUI(){
 function refreshPickFoot(){
   const n = sel.size;
   $('#pf-count').textContent = n;
-  const editing = !!(S.final || S.rank);
+  const editing = !!(L() && (L().final || L().rank));
   $('#pf-start').textContent = editing ? 'APPLY CHANGES' : 'START RANKING';
   if(n<2){ $('#pf-est').textContent = 'Pick at least 2 to start'; }
   else {
     const a=estTiered(n)+n, b=estFull(n);
-    $('#pf-est').textContent = editing ? 'Changes apply to your existing ranking' : `≈ ${a}–${b} matchups · ${fmtMin(a)}–${fmtMin(b)} of tapping`;
+    $('#pf-est').textContent = editing ? 'Changes apply to this list’s ranking' : `≈ ${a}–${b} matchups · ${fmtMin(a)}–${fmtMin(b)} of tapping`;
   }
   $('#pf-start').disabled = n<2;
 }
 function onPickConfirm(){
   const picked = [...sel];
   if(picked.length<2) return;
-  if(S.final || S.rank){ applySeenEdits(picked); return; }
-  S.seen = picked; save();
-  const n = picked.length;
+  if(L().final || L().rank){ applySeenEdits(picked); return; }
+  L().seen = picked; save();
+  // smart seeding from other completed lists
+  const pset = new Set(picked);
+  const donors = completedListsA().filter(l=>l.id!==L().id)
+    .map(l=>({ l, overlap: l.final.filter(i=>pset.has(i)).length }))
+    .sort((a,b)=>b.overlap-a.overlap);
+  const best = donors[0];
+  if(best && best.overlap===picked.length){
+    modal('ZERO MATCHUPS NEEDED', `Every title here is already ranked in “${esc(best.l.title)}”. Want to derive this list's order instantly from it?`, [
+      {label:'Rank it fresh instead', cls:'minibtn', fn:()=>freshStart(picked.length)},
+      {label:'⚡ Derive instantly', cls:'btn small gold', fn:()=>{
+        L().final = best.l.final.filter(i=>pset.has(i));
+        L().rankStats = { comps:0, at:Date.now(), derived: best.l.title };
+        save(); show('results'); toast(`Done — inherited your “${best.l.title}” order.`);
+      }}
+    ]);
+    return;
+  }
+  if(best && best.overlap>=5){
+    const fresh = picked.length - best.overlap;
+    modal('HEAD START AVAILABLE', `“${esc(best.l.title)}” already ranks ${best.overlap} of these titles. Keep that order as the backbone and you'll only need to slot in the other ${fresh} — a fraction of the matchups.`, [
+      {label:'Rank everything fresh', cls:'minibtn', fn:()=>freshStart(picked.length)},
+      {label:'🚀 Use the head start', cls:'btn small gold', fn:()=>{
+        const backbone = best.l.final.filter(i=>pset.has(i));
+        const rest = picked.filter(i=>!best.l.final.includes(i));
+        L().tierOf = {}; L().tierHist = []; L().tierQueue = null;
+        L().rank = { queues:[shuffle(rest),[],[],[]], sorted:[backbone,[],[],[]], cur:null, comps:0, hist:[] };
+        save(); show('rank');
+      }}
+    ]);
+    return;
+  }
+  freshStart(picked.length);
+}
+function freshStart(n){
   if(n < 12){ startRanking(false); return; }
   modal('WARM-UP ROUND?',
     `With ${n} titles, a quick warm-up (one tap each: Loved / Liked / Fine / Nah) pre-groups your list and cuts the matchups by roughly a third — <b>≈${estTiered(n)+n}</b> taps instead of <b>≈${estFull(n)}</b>. You can still fine-tune everything at the end.`,
@@ -719,29 +887,30 @@ function onPickConfirm(){
 
 /* ---------- TIERS (warm-up) ---------- */
 function startRanking(withTiers){
-  S.tierOf = {}; S.tierHist = [];
-  S.tierQueue = withTiers ? shuffle(S.seen) : null;
-  S.rank = null; S.final = null;
+  L().tierOf = {}; L().tierHist = [];
+  L().tierQueue = withTiers ? shuffle(L().seen) : null;
+  L().rank = null; L().final = null;
   save();
   show(withTiers ? 'tiers' : 'rank');
 }
 function renderTiers(){
   const root = $('#scr-tiers');
-  if(!S.tierQueue || !S.tierQueue.length){ buildRankFromTiers(); return; }
-  const idx = S.tierQueue[0];
-  const done = S.seen.length - S.tierQueue.length;
+  if(!L()) return show('home');
+  if(!L().tierQueue || !L().tierQueue.length){ buildRankFromTiers(); return; }
+  const idx = L().tierQueue[0];
+  const done = L().seen.length - L().tierQueue.length;
   root.innerHTML = `
     <div class="scr-head" style="text-align:center">
-      <div class="kicker">Step 2 of 3 · Warm-up</div>
+      <div class="kicker">${esc(L().title)} · Step 2 of 3 · Warm-up</div>
       <h2 class="h-disp" style="font-size:clamp(34px,5.4vw,54px)">FIRST INSTINCT</h2>
       <div class="prog-wrap">
-        <div class="prog-track"><i style="width:${Math.round(100*done/S.seen.length)}%"></i></div>
-        <div class="prog-meta"><span><b>${done}</b> / ${S.seen.length}</span><span>one tap each</span></div>
+        <div class="prog-track"><i style="width:${Math.round(100*done/L().seen.length)}%"></i></div>
+        <div class="prog-meta"><span><b>${done}</b> / ${L().seen.length}</span><span>one tap each</span></div>
       </div>
     </div>
     <div class="stage">
       <div id="tier-card">
-        ${posterEl(idx).outerHTML.replace('<div class="poster"','<div class="poster" id="tier-poster"')}
+        <div id="tier-poster-holder"></div>
         <div class="tc-name">${esc(CATALOG[idx].t)}</div>
         <div class="tc-year">${CATALOG[idx].y} · ${CATS[CATALOG[idx].c].label}</div>
       </div>
@@ -753,32 +922,31 @@ function renderTiers(){
         <button class="minibtn" id="tier-skip">Skip rest of warm-up →</button>
       </div>
     </div>`;
-  // rebuild poster with live onerror (outerHTML trick loses handler)
-  const tp = $('#tier-poster'); const fresh = posterEl(idx); tp.replaceWith(fresh);
+  $('#tier-poster-holder').appendChild(posterEl(idx));
   root.querySelectorAll('.tier-btn').forEach(b=>b.onclick = ()=>{
     const t = +b.dataset.tier;
-    S.tierOf[idx] = t; S.tierHist.push(idx); S.tierQueue.shift(); save();
+    L().tierOf[idx] = t; L().tierHist.push(idx); L().tierQueue.shift(); save();
     renderTiers();
   });
   $('#tier-undo').onclick = ()=>{
-    if(!S.tierHist.length) return toast('Nothing to undo yet');
-    const last = S.tierHist.pop(); delete S.tierOf[last]; S.tierQueue.unshift(last); save(); renderTiers();
+    if(!L().tierHist.length) return toast('Nothing to undo yet');
+    const last = L().tierHist.pop(); delete L().tierOf[last]; L().tierQueue.unshift(last); save(); renderTiers();
   };
   $('#tier-skip').onclick = ()=>{
-    S.tierQueue.forEach(i=>{ if(S.tierOf[i]==null) S.tierOf[i]=1; });
-    S.tierQueue = []; save(); buildRankFromTiers();
+    L().tierQueue.forEach(i=>{ if(L().tierOf[i]==null) L().tierOf[i]=1; });
+    L().tierQueue = []; save(); buildRankFromTiers();
   };
 }
 function buildRankFromTiers(){
   const tiers = [[],[],[],[]];
-  if(Object.keys(S.tierOf).length){
-    S.seen.forEach(i=>{ tiers[S.tierOf[i] ?? 1].push(i); });
+  if(Object.keys(L().tierOf).length){
+    L().seen.forEach(i=>{ tiers[L().tierOf[i] ?? 1].push(i); });
   } else {
-    tiers[0] = [...S.seen];
+    tiers[0] = [...L().seen];
   }
   const queues = tiers.map(t=>shuffle(t));
-  S.rank = { queues, sorted:[[],[],[],[]], cur:null, comps:0, hist:[] };
-  S.tierQueue = null; save();
+  L().rank = { queues, sorted:[[],[],[],[]], cur:null, comps:0, hist:[] };
+  L().tierQueue = null; save();
   show('rank');
 }
 
@@ -786,19 +954,19 @@ function buildRankFromTiers(){
 let PAIR = null, LOCK = false;
 
 function pushSnapshot(){
-  const r = S.rank;
-  r.hist.push(JSON.stringify({queues:r.queues, sorted:r.sorted, cur:r.cur, comps:r.comps, seen:S.seen}));
+  const r = L().rank;
+  r.hist.push(JSON.stringify({queues:r.queues, sorted:r.sorted, cur:r.cur, comps:r.comps, seen:L().seen}));
   if(r.hist.length > 40) r.hist.shift();
 }
 function popSnapshot(){
-  const r = S.rank;
+  const r = L().rank;
   if(!r || !r.hist.length) return false;
   const s = JSON.parse(r.hist.pop());
-  r.queues=s.queues; r.sorted=s.sorted; r.cur=s.cur; r.comps=s.comps; S.seen=s.seen;
+  r.queues=s.queues; r.sorted=s.sorted; r.cur=s.cur; r.comps=s.comps; L().seen=s.seen;
   return true;
 }
 function ensureCur(){
-  const r = S.rank;
+  const r = L().rank;
   while(true){
     if(r.cur) return true;
     let t = -1;
@@ -811,7 +979,7 @@ function ensureCur(){
   }
 }
 function estRemaining(){
-  const r = S.rank; if(!r) return 0;
+  const r = L().rank; if(!r) return 0;
   let rem = 0;
   if(r.cur) rem += log2ceil(r.cur.hi - r.cur.lo + 1);
   for(let t=0;t<4;t++){
@@ -820,18 +988,19 @@ function estRemaining(){
   }
   return rem;
 }
-function placedCount(){ return S.rank ? S.rank.sorted.flat().length : 0; }
+function placedCount(){ return L().rank ? L().rank.sorted.flat().length : 0; }
 
 function renderRank(){
   const root = $('#scr-rank');
-  if(!S.rank){
-    if(S.final) return show('results');
-    if(S.tierQueue && S.tierQueue.length) return show('tiers');
-    if(!S.seen.length) return show('home');
+  if(!L()) return show('home');
+  if(!L().rank){
+    if(L().final) return show('results');
+    if(L().tierQueue && L().tierQueue.length) return show('tiers');
+    if(!L().seen.length) return show('home');
     buildRankFromTiers(); return;
   }
   if(!ensureCur()) return finishRanking();
-  const r = S.rank, c = r.cur;
+  const r = L().rank, c = r.cur;
   const mid = (c.lo + c.hi) >> 1;
   const comparator = r.sorted[c.t][mid];
   const flip = Math.random() < .5;
@@ -845,7 +1014,7 @@ function renderRank(){
       <div class="prog-wrap">
         <div class="prog-track"><i style="width:${pct}%"></i></div>
         <div class="prog-meta">
-          <span>Placed <b>${placedCount()}</b> / ${S.seen.length}</span>
+          <span>Placed <b>${placedCount()}</b> / ${L().seen.length}</span>
           <span><b>${r.comps}</b> picked · ~${rem} left</span>
         </div>
       </div>
@@ -881,9 +1050,9 @@ function renderRank(){
   LOCK = false;
 }
 function pick(winnerIdx){
-  if(LOCK || !S.rank || !S.rank.cur) return;
+  if(LOCK || !L().rank || !L().rank.cur) return;
   LOCK = true;
-  const r = S.rank, c = r.cur;
+  const r = L().rank, c = r.cur;
   const mid = (c.lo + c.hi) >> 1;
   pushSnapshot();
   if(winnerIdx === c.item) c.hi = mid; else c.lo = mid + 1;
@@ -896,11 +1065,11 @@ function pick(winnerIdx){
   setTimeout(renderRank, 300);
 }
 function markUnseen(idx){
-  if(LOCK || !S.rank) return;
-  const r = S.rank, c = r.cur;
+  if(LOCK || !L().rank) return;
+  const r = L().rank, c = r.cur;
   pushSnapshot();
-  S.seen = S.seen.filter(i=>i!==idx);
-  delete S.tierOf[idx];
+  L().seen = L().seen.filter(i=>i!==idx);
+  delete L().tierOf[idx];
   if(c && idx === c.item){ r.cur = null; }
   else if(c){
     const mid = (c.lo + c.hi) >> 1;
@@ -913,10 +1082,10 @@ function markUnseen(idx){
   renderRank();
 }
 function finishRanking(){
-  const r = S.rank;
-  S.final = r.sorted.flat();
-  S.rankStats = { comps: r.comps, at: Date.now() };
-  S.rank = null;
+  const r = L().rank;
+  L().final = r.sorted.flat();
+  L().rankStats = { comps: r.comps, at: Date.now() };
+  L().rank = null;
   save();
   confetti();
   show('results');
@@ -925,22 +1094,25 @@ function finishRanking(){
 
 /* ---------- RESULTS ---------- */
 let resFilter = 'all', resQuery = '', resEditing = false;
-function currentOrder(){ return S.final ? S.final : (S.rank ? S.rank.sorted.flat() : []); }
+function currentOrder(){ return L().final ? L().final : (L().rank ? L().rank.sorted.flat() : []); }
 function renderResults(){
   const root = $('#scr-results');
+  if(!L()) return show('home');
   const order = currentOrder();
   if(!order.length){ show('home'); return; }
-  const isFinal = !!S.final;
+  const isFinal = !!L().final;
   resEditing = resEditing && isFinal;
   const catsPresent = CAT_ORDER.filter(c=>order.some(i=>CATALOG[i].c===c));
-  const stats = S.rankStats ? `Forged in ${S.rankStats.comps} matchups · ${new Date(S.rankStats.at).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'})}` : '';
+  const rs = L().rankStats;
+  const stats = rs ? (rs.derived ? `Derived from “${esc(rs.derived)}” — zero extra matchups` : `Forged in ${rs.comps} matchups · ${new Date(rs.at).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'})}`) : '';
 
   root.innerHTML = `
     <div class="res-head">
       <div>
-        <div class="kicker">${isFinal ? 'The verdict' : 'Work in progress'}</div>
-        <h2 class="h-disp">${S.name ? esc(S.name.toUpperCase())+'’S' : 'YOUR'} RANKING</h2>
-        <div class="sub">${isFinal ? `${order.length} titles, settled. ${stats}` : `${order.length} of ${S.seen.length} placed so far`}</div>
+        <div class="kicker">${S.name ? esc(S.name) + ' · ' : ''}${isFinal ? 'The verdict' : 'Work in progress'}</div>
+        <h2 class="h-disp">${esc(L().title.toUpperCase())}</h2>
+        <div class="sub">${isFinal ? `${order.length} titles, settled. ${stats}` : `${order.length} of ${L().seen.length} placed so far`}
+          ${S.lists.length>1 ? ` · <button class="minibtn" data-nav="home" style="border:none;text-decoration:underline dotted;text-underline-offset:3px;padding:2px">all lists</button>` : ''}</div>
       </div>
       <div class="res-actions">
         ${isFinal ? `
@@ -975,7 +1147,7 @@ function renderResults(){
   const rc=$('#ra-code'); if(rc) rc.onclick = ()=>copyText(encodeShare(), 'Share code copied!');
   const res=$('#ra-resume'); if(res) res.onclick = ()=>show('rank');
   const esn=$('#ra-editseen'); if(esn) esn.onclick = ()=>show('pick');
-  const rst=$('#ra-restart'); if(rst) rst.onclick = confirmRestart;
+  const rst=$('#ra-restart'); if(rst) rst.onclick = confirmRerank;
   renderResList();
 }
 function renderResList(){
@@ -1030,7 +1202,7 @@ function doDrop(targetPos, row, e){
   moveItem(dragPos, to); dragPos = null;
 }
 function moveItem(from, to){
-  const o = S.final;
+  const o = L().final;
   if(!o || to<0 || to>=o.length || from===to) return;
   const [it] = o.splice(from,1);
   o.splice(to,0,it);
@@ -1040,10 +1212,12 @@ function moveItem(from, to){
 /* ---------- share codec ---------- */
 function b64encode(bytes){ let s=''; bytes.forEach(b=>s+=String.fromCharCode(b)); return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
 function b64decode(str){ str=String(str).replace(/-/g,'+').replace(/_/g,'/'); while(str.length%4)str+='='; const bin=atob(str); return Uint8Array.from(bin, c=>c.charCodeAt(0)); }
-function encodeShare(){
+function encodeShare(list){
+  list = list || L();
   const name = new TextEncoder().encode(S.name || 'A friend').slice(0,24);
-  const o = S.final || [];
-  return 'MR1.' + b64encode(Uint8Array.from([1, name.length, ...name, o.length, ...o]));
+  const title = new TextEncoder().encode(list.title || 'Ranking').slice(0,40);
+  const o = list.final || [];
+  return 'MR1.' + b64encode(Uint8Array.from([2, name.length, ...name, title.length, ...title, o.length, ...o]));
 }
 function decodeShare(raw){
   let str = String(raw).trim();
@@ -1051,17 +1225,27 @@ function decodeShare(raw){
   str = decodeURIComponent(str);
   if(str.startsWith('MR1.')) str = str.slice(4);
   const b = b64decode(str);
-  if(b[0]!==1) throw new Error('version');
-  const nl = b[1];
-  const name = new TextDecoder().decode(b.slice(2, 2+nl)) || 'A friend';
-  const n = b[2+nl];
-  const order = [...b.slice(3+nl, 3+nl+n)];
+  const v = b[0];
+  if(v!==1 && v!==2) throw new Error('version');
+  let p = 1;
+  const nl = b[p++];
+  const name = new TextDecoder().decode(b.slice(p, p+nl)) || 'A friend'; p += nl;
+  let title = 'their ranking';
+  if(v===2){ const tl = b[p++]; title = new TextDecoder().decode(b.slice(p, p+tl)) || title; p += tl; }
+  const n = b[p++];
+  const order = [...b.slice(p, p+n)];
   if(order.length!==n || n<2) throw new Error('length');
   const seen = new Set();
   for(const i of order){ if(i>=CATALOG.length || seen.has(i)) throw new Error('bad idx'); seen.add(i); }
-  return { name, order };
+  return { name, title, order };
 }
-function shareLink(){ return location.href.split('#')[0] + '#c=' + encodeShare(); }
+function shareLink(list){ return location.href.split('#')[0] + '#c=' + encodeShare(list); }
+function completedLists(){ return S.lists.filter(l=>l.final && l.final.length>1); }
+function bestListFor(order){
+  const set = new Set(order);
+  return completedLists().sort((a,b)=>
+    b.final.filter(i=>set.has(i)).length - a.final.filter(i=>set.has(i)).length)[0] || null;
+}
 
 /* ---------- COMPARE ---------- */
 function renderCompare(arg){
@@ -1077,7 +1261,7 @@ function renderCompare(arg){
       <input id="cmp-code" placeholder="MR1.…  or a full share link">
       <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
         <button class="btn small" id="cmp-go">COMPARE</button>
-        ${S.final ? '<button class="minibtn" id="cmp-mine">Copy my link to send back</button>' : ''}
+        ${completedLists().length ? '<button class="minibtn" id="cmp-mine">Copy my link to send back</button>' : ''}
       </div>
       <div class="saved-friends" id="saved-friends"></div>
     </div>
@@ -1087,7 +1271,10 @@ function renderCompare(arg){
     catch(e){ toast('Hmm, that code didn’t parse. Make sure you copied the whole thing.'); }
   };
   $('#cmp-code').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#cmp-go').click(); });
-  const cm = $('#cmp-mine'); if(cm) cm.onclick = ()=>copyText(shareLink(), 'Your link is copied — send it back!');
+  const cm = $('#cmp-mine'); if(cm) cm.onclick = ()=>{
+    const l = (L() && L().final) ? L() : completedLists()[0];
+    copyText(shareLink(l), `Your “${l.title}” link is copied — send it back!`);
+  };
   renderSavedFriends();
   if(friend) runCompare(friend);
 }
@@ -1095,32 +1282,37 @@ function renderSavedFriends(){
   const box = $('#saved-friends'); if(!box) return;
   if(!S.friends.length){ box.innerHTML=''; return; }
   box.innerHTML = '<div style="font-size:12px;color:var(--faint);margin-bottom:8px">SAVED FRIENDS</div>' +
-    S.friends.map((f,i)=>`<span class="friend-pill"><button class="minibtn" data-fr="${i}">⚔️ ${esc(f.name)}</button><button class="minibtn danger" data-frx="${i}" aria-label="remove">✕</button></span>`).join('');
+    S.friends.map((f,i)=>`<span class="friend-pill"><button class="minibtn" data-fr="${i}">⚔️ ${esc(f.name)}${f.title && f.title!=='their ranking' ? ' · '+esc(f.title) : ''}</button><button class="minibtn danger" data-frx="${i}" aria-label="remove">✕</button></span>`).join('');
   box.querySelectorAll('[data-fr]').forEach(b=>b.onclick = ()=>runCompare(S.friends[+b.dataset.fr]));
   box.querySelectorAll('[data-frx]').forEach(b=>b.onclick = ()=>{ S.friends.splice(+b.dataset.frx,1); save(); renderSavedFriends(); });
 }
-function runCompare(friend){
+function runCompare(friend, myListId){
   // persist friend
-  const code = 'MR1.' + b64encode(Uint8Array.from([1, ...(x=>[x.length,...x])(new TextEncoder().encode(friend.name).slice(0,24)), friend.order.length, ...friend.order]));
-  const existing = S.friends.findIndex(f=>f.name===friend.name);
-  const rec = { name: friend.name, order: friend.order, code, at: Date.now() };
+  const existing = S.friends.findIndex(f=>f.name===friend.name && (f.title||'')===(friend.title||''));
+  const rec = { name: friend.name, title: friend.title || '', order: friend.order, at: Date.now() };
   if(existing>=0) S.friends[existing]=rec; else S.friends.push(rec);
   save(); renderSavedFriends();
 
   const out = $('#cmp-out');
   const mini = (idx, rk)=>`<div class="mini-row"><div class="rk">${rk}</div><div class="thumb" data-mth="${idx}"></div><div class="nm">${esc(CATALOG[idx].t)}</div></div>`;
 
-  if(!S.final){
+  const done = completedLists();
+  if(!done.length){
     out.innerHTML = `
-      <div class="cmp-hero"><div class="cmp-name them">${esc(friend.name.toUpperCase())}’S TOP 10</div></div>
+      <div class="cmp-hero"><div class="cmp-name them">${esc(friend.name.toUpperCase())}’S ${esc((friend.title||'TOP 10').toUpperCase())}</div></div>
       <div class="mini-list" style="max-width:420px;margin:0 auto">${friend.order.slice(0,10).map((i,k)=>mini(i,k+1)).join('')}</div>
-      <div class="partial-note" style="margin-top:26px">You haven't finished your own ranking yet — build it to unlock the full face-off, biggest beefs and all. <button class="btn small" id="cmp-build">START MINE</button></div>`;
+      <div class="partial-note" style="margin-top:26px">You haven't finished a ranking yet — build one to unlock the full face-off, biggest beefs and all. <button class="btn small" id="cmp-build">START MINE</button></div>`;
     out.querySelectorAll('[data-mth]').forEach(h=>h.appendChild(posterEl(+h.dataset.mth)));
-    $('#cmp-build').onclick = ()=>show(S.rank ? 'rank' : (S.seen.length ? 'rank' : 'pick'));
+    $('#cmp-build').onclick = ()=>show('home');
     return;
   }
+  const myList = (myListId && done.find(l=>l.id===myListId)) || bestListFor(friend.order);
+  const listPicker = done.length>1 ? `
+    <div style="text-align:center;margin:18px 0 0;font-size:13px;color:var(--dim)">Your side:
+      ${done.map(l=>`<button class="chip ${l.id===myList.id?'on':''}" data-mylist="${l.id}" style="margin-left:6px">${esc(l.title)}</button>`).join('')}
+    </div>` : '';
 
-  const mine = S.final, theirs = friend.order;
+  const mine = myList.final, theirs = friend.order;
   const theirSet = new Set(theirs), mySet = new Set(mine);
   const shared = mine.filter(i=>theirSet.has(i));
   const sharedSet = new Set(shared);
@@ -1163,7 +1355,8 @@ function runCompare(friend){
       </div>
       <div class="cmp-name them">${esc(friend.name.toUpperCase())}</div>
     </div>
-    <div class="cmp-verdict">${verdict} <span style="color:var(--faint)">(${n} titles in common)</span></div>
+    <div class="cmp-verdict">${verdict} <span style="color:var(--faint)">(${n} titles in common · your “${esc(myList.title)}” vs their “${esc(friend.title||'ranking')}”)</span></div>
+    ${listPicker}
     ${beefs.length ? `<div class="cmp-sec"><h4><span class="bar"></span>BIGGEST DISAGREEMENTS</h4><div class="dis-grid">${beefs.map(disCard).join('')}</div></div>` : ''}
     <div class="cmp-sec"><h4><span class="bar" style="background:var(--c-classic)"></span>WHERE YOU AGREE</h4><div class="dis-grid">${agrees.map(agCard).join('')}</div></div>
     <div class="cmp-cols">
@@ -1172,21 +1365,21 @@ function runCompare(friend){
     </div>
     ${(onlyMe.length||onlyThem.length) ? `<div class="cmp-sec"><h4><span class="bar" style="background:var(--c-fox)"></span>DIFFERENT DIETS</h4>
       <div class="cmp-cols" style="margin-top:0">
-        <div><div style="font-size:12px;color:var(--faint);margin-bottom:8px">ONLY YOU RANKED (${onlyMe.length})</div><div class="mini-list">${onlyMe.slice(0,6).map(i=>mini(i, myFullRank(i))).join('')||'<span style="color:var(--faint);font-size:13px">Nothing — they’ve seen it all.</span>'}${onlyMe.length>6?`<div style="font-size:12px;color:var(--faint)">+ ${onlyMe.length-6} more</div>`:''}</div></div>
+        <div><div style="font-size:12px;color:var(--faint);margin-bottom:8px">ONLY YOU RANKED (${onlyMe.length})</div><div class="mini-list">${onlyMe.slice(0,6).map(i=>mini(i, mine.indexOf(i)+1)).join('')||'<span style="color:var(--faint);font-size:13px">Nothing — they’ve seen it all.</span>'}${onlyMe.length>6?`<div style="font-size:12px;color:var(--faint)">+ ${onlyMe.length-6} more</div>`:''}</div></div>
         <div><div style="font-size:12px;color:var(--faint);margin-bottom:8px">ONLY ${esc(friend.name.toUpperCase())} RANKED (${onlyThem.length})</div><div class="mini-list">${onlyThem.slice(0,6).map(i=>mini(i, theirs.indexOf(i)+1)).join('')||'<span style="color:var(--faint);font-size:13px">Nothing — you’ve seen it all.</span>'}${onlyThem.length>6?`<div style="font-size:12px;color:var(--faint)">+ ${onlyThem.length-6} more</div>`:''}</div></div>
       </div></div>` : ''}`;
   out.querySelectorAll('[data-mth]').forEach(h=>h.appendChild(posterEl(+h.dataset.mth)));
+  out.querySelectorAll('[data-mylist]').forEach(b=>b.onclick = ()=>runCompare(friend, b.dataset.mylist));
   out.scrollIntoView({behavior:'smooth', block:'start'});
 }
-function myFullRank(i){ return S.final ? S.final.indexOf(i)+1 : 0; }
 
 /* ---------- seen-list edits after the fact ---------- */
 function applySeenEdits(picked){
   const after = new Set(picked);
-  const before = new Set(S.seen);
+  const before = new Set(L().seen);
   const added = picked.filter(i=>!before.has(i));
-  const removedCount = S.seen.filter(i=>!after.has(i)).length;
-  if(S.rank && !S.final){
+  const removedCount = L().seen.filter(i=>!after.has(i)).length;
+  if(L().rank && !L().final){
     if(added.length){
       modal('FINISH FIRST', 'You’re mid-ranking — new titles can only be slotted in once the current ranking is done. Removals can be applied now.', [
         {label:'Cancel', cls:'minibtn'},
@@ -1197,11 +1390,11 @@ function applySeenEdits(picked){
     applyRemovalsMidRank(after); show('rank'); return;
   }
   // final exists
-  S.seen = picked;
-  S.final = S.final.filter(i=>after.has(i));
+  L().seen = picked;
+  L().final = L().final.filter(i=>after.has(i));
   if(added.length){
-    S.rank = { queues:[shuffle(added),[],[],[]], sorted:[S.final.slice(),[],[],[]], cur:null, comps:S.rankStats?S.rankStats.comps:0, hist:[] };
-    S.final = null;
+    L().rank = { queues:[shuffle(added),[],[],[]], sorted:[L().final.slice(),[],[],[]], cur:null, comps:L().rankStats?L().rankStats.comps:0, hist:[] };
+    L().final = null;
     save();
     toast(`${added.length} new title${added.length>1?'s':''} entering the arena…`);
     show('rank');
@@ -1212,8 +1405,8 @@ function applySeenEdits(picked){
   }
 }
 function applyRemovalsMidRank(after){
-  const r = S.rank;
-  S.seen = S.seen.filter(i=>after.has(i));
+  const r = L().rank;
+  L().seen = L().seen.filter(i=>after.has(i));
   r.queues = r.queues.map(q=>q.filter(i=>after.has(i)));
   r.sorted = r.sorted.map(sarr=>sarr.filter(i=>after.has(i)));
   if(r.cur && (!after.has(r.cur.item) || r.sorted[r.cur.t].length===0)) r.cur = null;
